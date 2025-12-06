@@ -33,7 +33,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
     tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
 
-    raster_settings = GaussianRasterizationSettings(
+    common_kwargs = dict(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
         tanfovx=tanfovx,
@@ -45,9 +45,21 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
-        debug=pipe.debug,
-        antialiasing=pipe.antialiasing
+        debug=pipe.debug
     )
+
+    # try to do antialiasing
+    try:
+        raster_settings = GaussianRasterizationSettings(**common_kwargs, antialiasing=getattr(pipe, "antialiasing", False))
+    except TypeError as e:
+        msg = str(e)
+        if "unexpected" in msg or "got an unexpected keyword argument" in msg:
+            # None-antialiasing
+            raster_settings = GaussianRasterizationSettings(**common_kwargs)
+        elif "missing" in msg and "antialiasing" in msg:
+            raster_settings = GaussianRasterizationSettings(**common_kwargs)
+        else:
+            raise
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
@@ -86,9 +98,17 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     else:
         colors_precomp = override_color
 
+    # start to measure
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        mem_before = torch.cuda.max_memory_allocated() / (1024 ** 2)  # MB
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     if separate_sh:
-        rendered_image, radii, depth_image = rasterizer(
+        rasterizer_output = rasterizer(
             means3D = means3D,
             means2D = means2D,
             dc = dc,
@@ -99,7 +119,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             rotations = rotations,
             cov3D_precomp = cov3D_precomp)
     else:
-        rendered_image, radii, depth_image = rasterizer(
+        rasterizer_output = rasterizer(
             means3D = means3D,
             means2D = means2D,
             shs = shs,
@@ -108,8 +128,30 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             scales = scales,
             rotations = rotations,
             cov3D_precomp = cov3D_precomp)
-        
-    # Apply exposure to rendered image (training only)
+    
+    # End to measure
+    if torch.cuda.is_available():
+        end_event.record()
+        torch.cuda.synchronize()
+        render_time_ms = start_event.elapsed_time(end_event)
+        mem_after = torch.cuda.max_memory_allocated() / (1024 ** 2)  # MB
+        mem_used = mem_after - mem_before
+        fps = 1000.0 / render_time_ms if render_time_ms > 0 else 0.0
+    else:
+        render_time_ms = 0.0
+        mem_used = 0.0
+        fps = 0.0
+
+    # 반환값 개수에 따라 동적 처리
+    if len(rasterizer_output) == 3:
+        rendered_image, radii, depth_image = rasterizer_output
+    elif len(rasterizer_output) == 2:
+        rendered_image, radii = rasterizer_output
+        depth_image = None
+    else:
+        raise ValueError(f"Unexpected rasterizer output: {len(rasterizer_output)} values")
+        # Apply exposure to rendered image (training only)
+
     if use_trained_exp:
         exposure = pc.get_exposure_from_name(viewpoint_camera.image_name)
         rendered_image = torch.matmul(rendered_image.permute(1, 2, 0), exposure[:3, :3]).permute(2, 0, 1) + exposure[:3, 3,   None, None]
@@ -122,7 +164,10 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         "viewspace_points": screenspace_points,
         "visibility_filter" : (radii > 0).nonzero(),
         "radii": radii,
-        "depth" : depth_image
+        "depth" : depth_image,
+        "render_time_ms": render_time_ms,
+        "memory_used_mb": mem_used,
+        "fps": fps
         }
     
     return out

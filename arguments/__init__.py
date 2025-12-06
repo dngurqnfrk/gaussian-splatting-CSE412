@@ -119,4 +119,15 @@ def get_combined_args(parser : ArgumentParser):
     for k,v in vars(args_cmdline).items():
         if v != None:
             merged_dict[k] = v
+
+    # Add missing attributes for backward compatibility
+    if 'depths' not in merged_dict:
+        merged_dict['depths'] = ""
+
+    if 'train_test_exp' not in merged_dict:
+        merged_dict['train_test_exp'] = False
+    
+    if 'data_device' not in merged_dict:
+        merged_dict['data_device'] = "cuda"
+
     return Namespace(**merged_dict)

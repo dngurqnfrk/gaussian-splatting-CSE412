@@ -26,6 +26,9 @@ try:
 except:
     SPARSE_ADAM_AVAILABLE = False
 
+import json
+import numpy as np
+
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background, train_test_exp, separate_sh):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
@@ -34,8 +37,20 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
 
+    # 통계 수집을 위한 리스트
+    fps_list = []
+    render_time_list = []
+    memory_list = []
+
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        rendering = render(view, gaussians, pipeline, background, use_trained_exp=train_test_exp, separate_sh=separate_sh)["render"]
+        render_pkg = render(view, gaussians, pipeline, background, use_trained_exp=train_test_exp, separate_sh=separate_sh)
+        rendering = render_pkg["render"]
+        
+        # 성능 통계 수집
+        fps_list.append(render_pkg.get("fps", 0.0))
+        render_time_list.append(render_pkg.get("render_time_ms", 0.0))
+        memory_list.append(render_pkg.get("memory_used_mb", 0.0))
+        
         gt = view.original_image[0:3, :, :]
 
         if args.train_test_exp:
@@ -44,6 +59,59 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        
+    # 통계 계산
+    if fps_list:
+        stats = {
+            "num_frames": len(fps_list),
+            "fps": {
+                "mean": float(np.mean(fps_list)),
+                "std": float(np.std(fps_list)),
+                "min": float(np.min(fps_list)),
+                "max": float(np.max(fps_list)),
+                "median": float(np.median(fps_list))
+            },
+            "render_time_ms": {
+                "mean": float(np.mean(render_time_list)),
+                "std": float(np.std(render_time_list)),
+                "min": float(np.min(render_time_list)),
+                "max": float(np.max(render_time_list)),
+                "median": float(np.median(render_time_list))
+            },
+            "memory_mb": {
+                "mean": float(np.mean(memory_list)),
+                "std": float(np.std(memory_list)),
+                "min": float(np.min(memory_list)),
+                "max": float(np.max(memory_list)),
+                "median": float(np.median(memory_list))
+            }
+        }
+        
+        # 콘솔 출력
+        print(f"\n{'='*60}")
+        print(f"Rendering Performance Statistics ({name} set)")
+        print(f"{'='*60}")
+        print(f"Frames rendered: {stats['num_frames']}")
+        print(f"\nFPS:")
+        print(f"  Mean:   {stats['fps']['mean']:.2f} fps")
+        print(f"  Median: {stats['fps']['median']:.2f} fps")
+        print(f"  Min:    {stats['fps']['min']:.2f} fps")
+        print(f"  Max:    {stats['fps']['max']:.2f} fps")
+        print(f"\nRender Time:")
+        print(f"  Mean:   {stats['render_time_ms']['mean']:.2f} ms")
+        print(f"  Median: {stats['render_time_ms']['median']:.2f} ms")
+        print(f"\nMemory Usage:")
+        print(f"  Mean:   {stats['memory_mb']['mean']:.2f} MB")
+        print(f"  Max:    {stats['memory_mb']['max']:.2f} MB")
+        print(f"{'='*60}\n")
+        
+        # JSON 파일로 저장
+        stats_path = os.path.join(model_path, name, "ours_{}".format(iteration), "performance_stats.json")
+        with open(stats_path, 'w') as f:
+            json.dump(stats, f, indent=4)
+        print(f"Performance statistics saved to: {stats_path}")
+    
+    return stats if fps_list else None
 
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, separate_sh: bool):
     with torch.no_grad():
