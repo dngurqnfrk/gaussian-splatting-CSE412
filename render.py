@@ -41,6 +41,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     fps_list = []
     render_time_list = []
     memory_list = []
+    avg_gaussians_per_tile_list = []
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         render_pkg = render(view, gaussians, pipeline, background, use_trained_exp=train_test_exp, separate_sh=separate_sh)
@@ -50,6 +51,7 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         fps_list.append(render_pkg.get("fps", 0.0))
         render_time_list.append(render_pkg.get("render_time_ms", 0.0))
         memory_list.append(render_pkg.get("memory_used_mb", 0.0))
+        avg_gaussians_per_tile_list.append(render_pkg.get("avg_gaussians_per_tile", 0.0))
         
         gt = view.original_image[0:3, :, :]
 
@@ -84,7 +86,14 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
                 "min": float(np.min(memory_list)),
                 "max": float(np.max(memory_list)),
                 "median": float(np.median(memory_list))
-            }
+            },
+            "avg_gaussians_per_tile": {
+                "mean": float(np.mean(avg_gaussians_per_tile_list)),
+                "std": float(np.std(avg_gaussians_per_tile_list)),
+                "min": float(np.min(avg_gaussians_per_tile_list)),
+                "max": float(np.max(avg_gaussians_per_tile_list)),
+                "median": float(np.median(avg_gaussians_per_tile_list))
+            }   
         }
         
         # 콘솔 출력
@@ -103,6 +112,11 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         print(f"\nMemory Usage:")
         print(f"  Mean:   {stats['memory_mb']['mean']:.2f} MB")
         print(f"  Max:    {stats['memory_mb']['max']:.2f} MB")
+        print(f"\nAvg Gaussians Per Tile:")
+        print(f"  Mean:   {stats['avg_gaussians_per_tile']['mean']:.2f}")
+        print(f"  Median: {stats['avg_gaussians_per_tile']['median']:.2f}")
+        print(f"  Min:    {stats['avg_gaussians_per_tile']['min']:.2f}")
+        print(f"  Max:    {stats['avg_gaussians_per_tile']['max']:.2f}")
         print(f"{'='*60}\n")
         
         # JSON 파일로 저장

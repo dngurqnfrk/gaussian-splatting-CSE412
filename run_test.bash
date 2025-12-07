@@ -22,21 +22,3 @@ pip install .
 
 # 다시 프로젝트 루트로 복귀
 cd ../..
-
-echo "==========================================="
-echo ">> [2/3] Running Rendering..."
-echo "==========================================="
-
-# 렌더링 실행
-python render.py -m pretrained_models/flowers -s datasets/360_extra_scenes/flowers --skip_train
-
-echo "==========================================="
-echo ">> [3/3] Calculating Metrics..."
-echo "==========================================="
-
-# 메트릭 측정
-python metrics.py -m pretrained_models/flowers
-
-echo "==========================================="
-echo ">> All Done! Results are ready."
-echo "==========================================="

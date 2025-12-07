@@ -143,14 +143,23 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         fps = 0.0
 
     # 반환값 개수에 따라 동적 처리
-    if len(rasterizer_output) == 3:
+    if len(rasterizer_output) == 4:
+        rendered_image, radii, depth_image, num_rendered = rasterizer_output
+    elif len(rasterizer_output) == 3:
         rendered_image, radii, depth_image = rasterizer_output
+        num_rendered = 0
     elif len(rasterizer_output) == 2:
         rendered_image, radii = rasterizer_output
         depth_image = None
+        num_rendered = 0
     else:
         raise ValueError(f"Unexpected rasterizer output: {len(rasterizer_output)} values")
         # Apply exposure to rendered image (training only)
+
+    tile_width = (int(viewpoint_camera.image_width) + 15) // 16  # BLOCK_X = 16
+    tile_height = (int(viewpoint_camera.image_height) + 15) // 16  # BLOCK_Y = 16
+    num_tiles = tile_width * tile_height
+    avg_gaussians_per_tile = num_rendered / num_tiles if num_tiles > 0 else 0.0
 
     if use_trained_exp:
         exposure = pc.get_exposure_from_name(viewpoint_camera.image_name)
@@ -167,7 +176,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         "depth" : depth_image,
         "render_time_ms": render_time_ms,
         "memory_used_mb": mem_used,
-        "fps": fps
+        "fps": fps,
+        "avg_gaussians_per_tile" : avg_gaussians_per_tile
         }
     
     return out
